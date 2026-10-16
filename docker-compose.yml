@@ -1,0 +1,16 @@
+# Runs the published Fontra image. To build it yourself instead, see
+# docker-compose.build.yml.
+services:
+  fontra:
+    image: ${IMAGE_PREFIX:-ghcr.io/pigwin-3/fontra-docker}:${FONTRA_VERSION:-latest}
+    container_name: fontra
+    restart: unless-stopped
+    environment:
+      FONTRA_DEFAULT_FONT: ${FONTRA_DEFAULT_FONT-default.designspace}
+    ports:
+      - "${FONTRA_PORT:-8000}:8000"
+    volumes:
+      # :z relabels the folder so the container may use it on SELinux hosts
+      # such as Fedora. Other systems ignore it.
+      - ./fonts:/fonts:z
+    command: ["filesystem", "/fonts"]

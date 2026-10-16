@@ -1,0 +1,86 @@
+# Multi-user Fontra: user accounts, and fonts stored in a MySQL database.
+#
+#   browser -- https :8443 --> proxy (nginx) --> fontra   (Fontra + fontra-rcjk)
+#   browser -- https :8443/export/ --> proxy --> exporter (download page)
+#   browser -- https :9443 --> proxy (nginx) --> robocjk  (django-robo-cjk) --> db (MySQL)
+#   fontra  -- https://proxy:9443 --> proxy --> robocjk
+#
+# Setup instructions: README.md in this folder.
+#
+# This file runs the published images. To build them yourself instead, see
+# docker-compose.build.yml.
+
+name: fontra-multiuser
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: robocjk
+      MYSQL_USER: robocjk
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    # Case-sensitive text comparison: glyph names must be unique per font,
+    # and "A" and "a" are different glyphs.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_bin"]
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping --host=127.0.0.1 --user=root --password=\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  robocjk:
+    image: ${IMAGE_PREFIX:-ghcr.io/pigwin-3/fontra-docker}-robocjk:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      HASHIDS_SALT: ${HASHIDS_SALT:?Set HASHIDS_SALT in .env}
+      DATABASE_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      ALLOWED_HOSTS: ${PUBLIC_HOST:-localhost},localhost,proxy
+      CSRF_TRUSTED_ORIGINS: https://${PUBLIC_HOST:-localhost}
+      DJANGO_SUPERUSER_USERNAME: ${ADMIN_USERNAME:-admin}
+      DJANGO_SUPERUSER_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      DJANGO_SUPERUSER_EMAIL: ${ADMIN_EMAIL:-}
+    volumes:
+      - robocjk:/data
+
+  fontra:
+    image: ${IMAGE_PREFIX:-ghcr.io/pigwin-3/fontra-docker}:${FONTRA_VERSION:-latest}
+    restart: unless-stopped
+    # fontra-rcjk always connects over https, so it goes through the proxy.
+    command: ["rcjk", "proxy:9443", "--cache-dir", "/home/fontra/cache"]
+    volumes:
+      - fontra-cache:/home/fontra/cache
+
+  # Web page for downloading fonts, at https://PUBLIC_HOST:FONTRA_PORT/export/
+  exporter:
+    image: ${IMAGE_PREFIX:-ghcr.io/pigwin-3/fontra-docker}-exporter:${FONTRA_VERSION:-latest}
+    restart: unless-stopped
+
+  proxy:
+    image: ${IMAGE_PREFIX:-ghcr.io/pigwin-3/fontra-docker}-proxy:latest
+    restart: unless-stopped
+    depends_on:
+      - fontra
+      - robocjk
+      - exporter
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    ports:
+      - "${FONTRA_PORT:-8443}:8443"
+      - "${ROBOCJK_PORT:-9443}:9443"
+    volumes:
+      - ./certs:/etc/nginx/certs:z
+
+volumes:
+  db:
+  robocjk:
+  fontra-cache:

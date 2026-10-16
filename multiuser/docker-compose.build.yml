@@ -1,0 +1,34 @@
+# Builds the images locally instead of pulling them. Use it together with
+# docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+#
+# or add this line to .env, so plain `docker compose` commands include it:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml
+services:
+  robocjk:
+    image: fontra-docker-robocjk:local
+    build:
+      context: ./robocjk
+      args:
+        ROBOCJK_VERSION: ${ROBOCJK_VERSION:-master}
+
+  fontra:
+    image: fontra-docker:${FONTRA_VERSION:-latest}
+    build:
+      context: ..
+      args:
+        FONTRA_VERSION: ${FONTRA_VERSION:-latest}
+
+  exporter:
+    image: fontra-docker-exporter:${FONTRA_VERSION:-latest}
+    build:
+      context: ..
+      target: exporter
+      args:
+        FONTRA_VERSION: ${FONTRA_VERSION:-latest}
+
+  proxy:
+    image: fontra-docker-proxy:local
+    build: ./nginx

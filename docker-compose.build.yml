@@ -1,0 +1,17 @@
+# Builds the Fontra image locally instead of pulling it. Use it together
+# with docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+#
+# or add this line to .env, so plain `docker compose` commands include it:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml
+services:
+  fontra:
+    image: fontra-docker:${FONTRA_VERSION:-latest}
+    build:
+      context: .
+      args:
+        FONTRA_VERSION: ${FONTRA_VERSION:-latest}
+        UID: ${FONTRA_UID:-1000}
+        GID: ${FONTRA_GID:-1000}

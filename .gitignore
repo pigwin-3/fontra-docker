@@ -1,0 +1,6 @@
+.env
+fonts/*
+!fonts/.gitkeep
+multiuser/certs/*
+!multiuser/certs/.gitkeep
+multiuser/exports/
