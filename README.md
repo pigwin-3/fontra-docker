@@ -38,6 +38,7 @@ To stop it: `docker compose down`
 | [`docker-compose.build.yml`](docker-compose.build.yml) | Adds the build steps. Option B turns it on. |
 | [`.env.example`](.env.example) | All settings. Copy it to `.env` to change them. |
 | [`fonts/`](fonts/) | Your fonts. |
+| [`patches/`](patches/) | Small changes to Fontra, made when the image is built. |
 
 ## Fonts
 
@@ -98,7 +99,10 @@ To see which Fontra version you have:
 
 ## Good to know
 
-- This image builds Fontra straight from its newest release on GitHub.
+- This image builds Fontra straight from its newest release on GitHub,
+  with the changes in [`patches/`](patches/). Each patch says at the top
+  what it does and why. A patch that no longer fits a newer Fontra is left
+  out, with a warning in the build log, and the image is built without it.
 - The image also has [fontra-rcjk](https://github.com/fontra/fontra-rcjk)
   for the multi-user version, and
   [fontra-compile](https://github.com/fontra/fontra-compile) for making

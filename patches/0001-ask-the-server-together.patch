@@ -1,0 +1,113 @@
+Ask the font server several things at once, when nothing waits for the
+answers in between.
+
+With the font on a server over the internet, each ask is a round trip, and
+the editor used to make them one after another: the font controller's
+initialize() asked 8 things in a row, and the shaper controller asked for
+the features, the conditional substitutions and the kerning only after the
+backend's shaper font, one by one. At 70 ms a round trip, that is about
+0.7 s of waiting before a glyph shows. Now initialize() asks them together,
+and the shaper controller asks for its data early, together with the shaper
+font; FontController.getData gives everyone who asks meanwhile the answer
+of the one request on its way.
+
+What Fontra does is the same; only the order of the asks changes.
+
+diff --git a/src-js/fontra-core/src/font-controller.js b/src-js/fontra-core/src/font-controller.js
+index eb014a4..7d70817 100644
+--- a/src-js/fontra-core/src/font-controller.js
++++ b/src-js/fontra-core/src/font-controller.js
+@@ -74,18 +74,40 @@ export class FontController {
+   async initialize(initListener = true) {
+     this._instanceRequestQueue = new InstanceRequestQueue(this);
+     this._backgroundImageCache = new LRUCache(BACKGROUND_IMAGE_CACHE_SIZE);
+-    const glyphMap = await this.font.getGlyphMap();
++    // Asked all at once: with the font on a server, each question is a
++    // round trip over the network, and none of them needs another's answer.
++    const [
++      glyphMap,
++      axes,
++      sources,
++      unitsPerEm,
++      customData,
++      metaInfo,
++      classSchema,
++      backendInfo,
++      readOnly,
++    ] = await Promise.all([
++      this.font.getGlyphMap(),
++      this.font.getAxes(),
++      this.font.getSources(),
++      this.font.getUnitsPerEm(),
++      this.font.getCustomData(),
++      this.font.getMetaInfo(),
++      getClassSchema(),
++      this.font.getBackEndInfo(),
++      this.font.isReadOnly(),
++    ]);
+     this.characterMap = makeCharacterMapFromGlyphMap(glyphMap, false);
+     this._rootObject = {};
+     this._rootObject.glyphMap = getGlyphMapProxy(glyphMap, this.characterMap);
+-    this._rootObject.axes = ensureDenseAxes(await this.font.getAxes());
+-    this._rootObject.sources = ensureDenseSources(await this.font.getSources());
+-    this._rootObject.unitsPerEm = await this.font.getUnitsPerEm();
+-    this._rootObject.customData = await this.font.getCustomData();
+-    this._rootObject.metaInfo = await this.font.getMetaInfo();
+-    this._rootClassDef = (await getClassSchema())["Font"];
+-    this.backendInfo = await this.font.getBackEndInfo();
+-    this.readOnly = await this.font.isReadOnly();
++    this._rootObject.axes = ensureDenseAxes(axes);
++    this._rootObject.sources = ensureDenseSources(sources);
++    this._rootObject.unitsPerEm = unitsPerEm;
++    this._rootObject.customData = customData;
++    this._rootObject.metaInfo = metaInfo;
++    this._rootClassDef = classSchema["Font"];
++    this.backendInfo = backendInfo;
++    this.readOnly = readOnly;
+ 
+     if (initListener) {
+       this.addChangeListener(
+@@ -169,7 +191,20 @@ export class FontController {
+       if (!methodName) {
+         throw Error(`unknown data key: ${key}`);
+       }
+-      this._rootObject[key] = await this.font[methodName]();
++      // One request for everyone who asks while it is on its way, such as
++      // the shaper controller's early ask (see getShaperFontData there).
++      if (!this._dataRequests) {
++        this._dataRequests = {};
++      }
++      if (!this._dataRequests[key]) {
++        this._dataRequests[key] = this.font[methodName]().finally(() => {
++          delete this._dataRequests[key];
++        });
++      }
++      const value = await this._dataRequests[key];
++      if (!this._rootObject[key]) {
++        this._rootObject[key] = value;
++      }
+     }
+     return this._rootObject[key];
+   }
+diff --git a/src-js/fontra-core/src/shaper-controller.js b/src-js/fontra-core/src/shaper-controller.js
+index 0068797..818fe2c 100644
+--- a/src-js/fontra-core/src/shaper-controller.js
++++ b/src-js/fontra-core/src/shaper-controller.js
+@@ -121,6 +121,17 @@ export class ShaperController {
+     const glyphOrder = Object.keys(this.fontController.glyphMap);
+ 
+     if (textShaping) {
++      // Asked for now, together with the backend's shaper font: when it has
++      // none, as most backends, these are needed next, and kerning just
++      // after. With the font on a server, each ask is a round trip. Anyone
++      // asking for them meanwhile gets the same answer (FontController's
++      // getData), and sees any error themselves.
++      Promise.all([
++        this.fontController.getFeatures(),
++        this.fontController.getConditionalSubstitutions(),
++        this.fontController.getKerning(),
++      ]).catch(() => {});
++
+       // First see if the backend has a shaper font for us
+       let shaperFontData = await this.fontController.getShaperFontData();
+ 

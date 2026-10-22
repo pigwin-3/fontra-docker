@@ -2,5 +2,6 @@
 # folder; everything else stays out (multiuser/.env holds secrets).
 *
 !docker-entrypoint.sh
+!patches/
 !multiuser/exporter/app.py
 !multiuser/exporter/export_job.py

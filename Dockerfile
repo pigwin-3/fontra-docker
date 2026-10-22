@@ -47,6 +47,11 @@ ARG FONTRA_COMPILE_VERSION=main
 
 WORKDIR /build
 
+# Our changes to Fontra, applied to its source before it is built: see the
+# text at the top of each patch. One that doesn't fit a newer Fontra is left
+# out with a warning, so the image still comes.
+COPY patches/ /build/patches/
+
 # Blobless clones keep the commit and tag history that hatch-vcs needs to
 # derive the package version, without downloading every old file revision.
 # fontra-rcjk bundles its login page against Fontra's JS sources, which it
@@ -63,6 +68,23 @@ RUN set -eu; \
     echo "Building Fontra $ref"; \
     git clone --quiet --filter=blob:none --no-checkout "$FONTRA_REPO" fontra; \
     git -C fontra -c advice.detachedHead=false checkout --quiet "$ref"; \
+    for patch in /build/patches/*.patch; do \
+        [ -e "$patch" ] || continue; \
+        if git -C fontra apply --check "$patch" 2>/dev/null; then \
+            git -C fontra apply "$patch"; \
+            echo "Applied $(basename "$patch")"; \
+        else \
+            echo "WARNING: $(basename "$patch") does not fit Fontra $ref, so it is left out" >&2; \
+        fi; \
+    done; \
+    if ! git -C fontra diff --quiet; then \
+        git -C fontra -c user.name=fontra-docker -c user.email=fontra-docker@localhost \
+            commit --quiet --all --message "fontra-docker patches"; \
+        # So the version stays the release's: hatch-vcs takes it from the tag.
+        if git -C fontra rev-parse --quiet --verify "refs/tags/$ref" >/dev/null; then \
+            git -C fontra tag --force "$ref" >/dev/null; \
+        fi; \
+    fi; \
     git clone --quiet --filter=blob:none --no-checkout "$FONTRA_RCJK_REPO" fontra-rcjk; \
     git -C fontra-rcjk -c advice.detachedHead=false checkout --quiet "$FONTRA_RCJK_VERSION"; \
     git -C fontra-rcjk submodule --quiet update --init --filter=blob:none; \
